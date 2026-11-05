@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
+const { extendCrm, AREAS } = require('./crm-db');
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS users (
@@ -77,7 +78,10 @@ function round(n) {
 }
 
 function publicUser(u) {
-  return u && { id: u.id, username: u.username, name: u.name, role: u.role, active: !!u.active };
+  return u && {
+    id: u.id, username: u.username, name: u.name, role: u.role, active: !!u.active,
+    area: u.area, position: u.position,
+  };
 }
 
 function openDatabase(file) {
@@ -85,6 +89,14 @@ function openDatabase(file) {
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
   db.exec(SCHEMA);
+
+  // Migración: área de la empresa y cargo de cada persona.
+  const userCols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  if (!userCols.includes('area')) {
+    db.exec("ALTER TABLE users ADD COLUMN area TEXT NOT NULL DEFAULT 'operaciones'");
+    db.exec("UPDATE users SET area = 'gerencia' WHERE role = 'admin'");
+  }
+  if (!userCols.includes('position')) db.exec("ALTER TABLE users ADD COLUMN position TEXT NOT NULL DEFAULT ''");
 
   function tx(fn) {
     db.exec('BEGIN IMMEDIATE');
@@ -152,7 +164,7 @@ function openDatabase(file) {
         db.prepare("UPDATE users SET role = 'admin', active = 1, pin_hash = ? WHERE id = ?")
           .run(hashPin(pin), existing.id);
       } else {
-        db.prepare("INSERT INTO users (username, name, role, pin_hash) VALUES ('admin', 'Administrador', 'admin', ?)")
+        db.prepare("INSERT INTO users (username, name, role, pin_hash, area) VALUES ('admin', 'Administrador', 'admin', ?, 'gerencia')")
           .run(hashPin(pin));
       }
       return 'admin';
@@ -181,7 +193,11 @@ function openDatabase(file) {
       return db.prepare('SELECT * FROM users ORDER BY active DESC, name').all().map(publicUser);
     },
 
-    createUser({ username, name, role, pin }) {
+    listPeople() {
+      return db.prepare('SELECT id, name, area, position FROM users WHERE active = 1 ORDER BY name COLLATE NOCASE').all();
+    },
+
+    createUser({ username, name, role, pin, area = 'operaciones', position = '' }) {
       username = String(username ?? '').trim().toLowerCase();
       name = String(name ?? '').trim();
       if (!/^[a-z0-9._-]{2,30}$/.test(username)) {
@@ -190,14 +206,15 @@ function openDatabase(file) {
       if (!name) throw new HttpError(400, 'El nombre es obligatorio');
       if (!['admin', 'personal'].includes(role)) throw new HttpError(400, 'Rol no válido');
       if (!/^\d{4,8}$/.test(String(pin ?? ''))) throw new HttpError(400, 'El PIN debe tener entre 4 y 8 dígitos');
+      if (!AREAS.includes(area)) throw new HttpError(400, 'Área no válida');
       if (q.userByUsername.get(username)) throw new HttpError(409, 'Ese nombre de usuario ya existe');
       const { lastInsertRowid } = db
-        .prepare('INSERT INTO users (username, name, role, pin_hash) VALUES (?, ?, ?, ?)')
-        .run(username, name.slice(0, 60), role, hashPin(pin));
+        .prepare('INSERT INTO users (username, name, role, pin_hash, area, position) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(username, name.slice(0, 60), role, hashPin(pin), area, String(position ?? '').trim().slice(0, 60));
       return publicUser(q.userById.get(lastInsertRowid));
     },
 
-    updateUser(id, { name, role, pin, active }) {
+    updateUser(id, { name, role, pin, active, area, position }) {
       return tx(() => {
         const user = q.userById.get(id);
         if (!user) throw new HttpError(404, 'Usuario no encontrado');
@@ -206,7 +223,10 @@ function openDatabase(file) {
           role: role !== undefined ? role : user.role,
           active: active !== undefined ? (active ? 1 : 0) : user.active,
           pin_hash: user.pin_hash,
+          area: area !== undefined ? area : user.area,
+          position: position !== undefined ? String(position ?? '').trim().slice(0, 60) : user.position,
         };
+        if (!AREAS.includes(next.area)) throw new HttpError(400, 'Área no válida');
         if (!next.name) throw new HttpError(400, 'El nombre es obligatorio');
         if (!['admin', 'personal'].includes(next.role)) throw new HttpError(400, 'Rol no válido');
         if (pin !== undefined && pin !== '') {
@@ -217,8 +237,8 @@ function openDatabase(file) {
         if (losesAdmin && q.countAdmins.get().n <= 1) {
           throw new HttpError(400, 'Debe quedar al menos un administrador activo');
         }
-        db.prepare('UPDATE users SET name = ?, role = ?, active = ?, pin_hash = ? WHERE id = ?')
-          .run(next.name, next.role, next.active, next.pin_hash, id);
+        db.prepare('UPDATE users SET name = ?, role = ?, active = ?, pin_hash = ?, area = ?, position = ? WHERE id = ?')
+          .run(next.name, next.role, next.active, next.pin_hash, next.area, next.position, id);
         if (!next.active || next.pin_hash !== user.pin_hash) {
           db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
         }
@@ -338,6 +358,7 @@ function openDatabase(file) {
     },
   };
 
+  api.crm = extendCrm(db, { tx, HttpError, round });
   return api;
 }
 

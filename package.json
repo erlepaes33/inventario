@@ -1,7 +1,7 @@
 {
   "name": "inventario-restaurante",
   "version": "1.0.0",
-  "description": "Inventario en tiempo real para restaurantes, compartido entre varias personas",
+  "description": "CRM inmobiliario en tiempo real: comercial, marketing, finanzas, operaciones, RR. HH. e inventario",
   "main": "server.js",
   "private": true,
   "scripts": {

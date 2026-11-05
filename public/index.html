@@ -4,14 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#1f6f5c">
-  <title>Inventario del Restaurante</title>
+  <title>CRM Inmobiliario</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <!-- Pantalla de acceso -->
   <section id="login-view" class="login" hidden>
     <form id="login-form" class="card login-card">
-      <h1>🍽️ Inventario</h1>
+      <h1>🏘️ CRM Inmobiliario</h1>
       <p class="muted">Entra con tu usuario y PIN</p>
       <label>Usuario
         <input name="username" autocomplete="username" autocapitalize="none" required>
@@ -27,7 +27,7 @@
   <!-- Aplicación -->
   <div id="app-view" hidden>
     <header class="topbar">
-      <div class="brand">🍽️ Inventario</div>
+      <div class="brand">🏘️ CRM</div>
       <div class="status">
         <span id="conn" class="conn off" title="Conexión en tiempo real">●</span>
         <span id="online" class="online"></span>
@@ -38,14 +38,30 @@
     </header>
 
     <nav class="tabs">
-      <button class="tab active" data-tab="inventory">Inventario</button>
+      <button class="tab active" data-tab="dashboard">Resumen</button>
+      <button class="tab" data-tab="contacts">Clientes</button>
+      <button class="tab" data-tab="deals">Ventas</button>
+      <button class="tab" data-tab="projects">Proyectos</button>
+      <button class="tab" data-tab="marketing">Marketing</button>
+      <button class="tab" data-tab="finance">Finanzas</button>
+      <button class="tab" data-tab="tasks">Tareas</button>
+      <button class="tab" data-tab="inventory">Inventario</button>
       <button class="tab" data-tab="movements">Movimientos</button>
       <button class="tab admin-only" data-tab="users">Personal</button>
     </nav>
 
     <main>
-      <!-- Inventario -->
-      <section id="tab-inventory" class="tab-panel">
+      <!-- Módulos del CRM (los dibuja crm.js) -->
+      <section id="tab-dashboard" class="tab-panel"></section>
+      <section id="tab-contacts" class="tab-panel" hidden></section>
+      <section id="tab-deals" class="tab-panel" hidden></section>
+      <section id="tab-projects" class="tab-panel" hidden></section>
+      <section id="tab-marketing" class="tab-panel" hidden></section>
+      <section id="tab-finance" class="tab-panel" hidden></section>
+      <section id="tab-tasks" class="tab-panel" hidden></section>
+
+      <!-- Inventario (materiales y suministros) -->
+      <section id="tab-inventory" class="tab-panel" hidden>
         <div class="summary" id="summary"></div>
         <div class="toolbar">
           <input id="search" type="search" placeholder="Buscar producto…">
@@ -79,7 +95,7 @@
           <button id="add-user" class="btn primary">+ Persona</button>
         </div>
         <table class="table">
-          <thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Estado</th><th></th></tr></thead>
+          <thead><tr><th>Nombre</th><th>Usuario</th><th>Área / cargo</th><th>Rol</th><th>Estado</th><th></th></tr></thead>
           <tbody id="user-list"></tbody>
         </table>
       </section>
@@ -102,6 +118,7 @@
   <div id="toasts" class="toasts" aria-live="polite"></div>
 
   <script src="/socket.io/socket.io.js"></script>
+  <script src="crm.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

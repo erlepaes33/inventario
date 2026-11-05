@@ -6,7 +6,7 @@ const state = {
   products: new Map(),
   movements: [],
   users: [],
-  tab: 'inventory',
+  tab: 'dashboard',
   socket: null,
 };
 
@@ -83,8 +83,8 @@ async function showApp() {
   $('#me-btn').textContent = `${state.user.name} ▾`;
   document.querySelectorAll('.admin-only').forEach((el) => { el.hidden = state.user.role !== 'admin'; });
   connectSocket();
-  await loadProducts();
-  if (state.tab !== 'inventory') switchTab(state.tab);
+  await Promise.all([loadProducts(), crm.init()]);
+  switchTab(state.tab);
 }
 
 function logout(callServer = true) {
@@ -122,7 +122,7 @@ $('#me-btn').addEventListener('click', () => {
     title: state.user.name,
     ok: 'Cambiar PIN',
     body: `
-      <p class="muted">Usuario: <b>${esc(state.user.username)}</b> · ${state.user.role === 'admin' ? 'Administrador' : 'Personal'}</p>
+      <p class="muted">Usuario: <b>${esc(state.user.username)}</b> · ${state.user.role === 'admin' ? 'Administrador' : 'Personal'} · Área: ${lab(state.user.area)}</p>
       <label>PIN actual <input name="current_pin" type="password" inputmode="numeric" required></label>
       <label>PIN nuevo (4-8 dígitos) <input name="new_pin" type="password" inputmode="numeric" pattern="\\d{4,8}" required></label>
       <button type="button" class="btn danger" id="logout-btn">Cerrar sesión</button>`,
@@ -156,6 +156,7 @@ function connectSocket() {
   // Tras una reconexión recargamos todo por si nos perdimos algún cambio.
   socket.io.on('reconnect', () => {
     loadProducts();
+    crm.onChange({ entity: 'all', action: 'reconnect', by: state.user });
     if (state.tab === 'movements') loadMovements();
   });
   socket.on('connect_error', (err) => {
@@ -176,6 +177,8 @@ function connectSocket() {
     refreshCategories();
     state.dialogProductWatcher?.(); // mantiene al día un diálogo de movimiento abierto
   });
+
+  socket.on('crm:changed', (event) => crm.onChange(event));
 
   socket.on('product:deleted', ({ product, by }) => {
     state.products.delete(product.id);
@@ -212,6 +215,7 @@ function switchTab(tab) {
   document.querySelectorAll('.tab-panel').forEach((p) => { p.hidden = p.id !== `tab-${tab}`; });
   if (tab === 'movements') loadMovements();
   if (tab === 'users') loadUsers();
+  crm.onTab(tab);
 }
 
 // ---------- Inventario ----------
@@ -305,9 +309,9 @@ function productDialog(p) {
     title: p ? 'Editar producto' : 'Nuevo producto',
     body: `
       <label>Nombre <input name="name" required maxlength="120" value="${esc(p?.name)}"></label>
-      <label>Categoría <input name="category" list="cat-options" maxlength="60" placeholder="Ej.: Carnes, Bebidas, Verduras" value="${esc(p?.category)}"></label>
+      <label>Categoría <input name="category" list="cat-options" maxlength="60" placeholder="Ej.: Cemento, Acero, Acabados" value="${esc(p?.category)}"></label>
       <datalist id="cat-options">${cats.map((c) => `<option value="${esc(c)}">`).join('')}</datalist>
-      <label>Unidad <input name="unit" list="unit-options" maxlength="20" placeholder="kg, litros, unidades…" value="${esc(p?.unit)}"></label>
+      <label>Unidad <input name="unit" list="unit-options" maxlength="20" placeholder="sacos, m³, unidades…" value="${esc(p?.unit)}"></label>
       <datalist id="unit-options">${['unidad', 'kg', 'g', 'litro', 'ml', 'caja', 'botella', 'paquete', 'lata'].map((u) => `<option value="${u}">`).join('')}</datalist>
       <label>Stock mínimo (avisa cuando baje de aquí) <input name="min_stock" type="number" min="0" step="any" value="${p?.min_stock ?? 0}"></label>
       ${p ? '<button type="button" class="btn danger" id="delete-product">Eliminar producto</button>'
@@ -342,7 +346,7 @@ function movementDialog(p, type) {
       <label><span id="qty-label">Cantidad (${esc(p.unit)})</span>
         <input name="quantity" type="number" min="0" step="any" inputmode="decimal" required>
       </label>
-      <label>Nota (opcional) <input name="note" maxlength="200" placeholder="Proveedor, motivo, mesa…"></label>
+      <label>Nota (opcional) <input name="note" maxlength="200" placeholder="Proveedor, obra, motivo…"></label>
       <p class="preview" id="preview"></p>`,
     onOpen: (body, form) => {
       const update = () => {
@@ -446,6 +450,7 @@ async function loadUsers() {
     <tr>
       <td><b>${esc(u.name)}</b></td>
       <td>${esc(u.username)}</td>
+      <td>${lab(u.area)}${u.position ? `<div class="meta">${esc(u.position)}</div>` : ''}</td>
       <td>${u.role === 'admin' ? 'Administrador' : 'Personal'}</td>
       <td>${u.active ? 'Activo' : '<span class="muted">Desactivado</span>'}</td>
       <td><button class="btn small ghost" data-user="${u.id}">Editar</button></td>
@@ -464,10 +469,14 @@ function userDialog(u) {
     body: `
       <label>Nombre <input name="name" required maxlength="60" value="${esc(u?.name)}"></label>
       ${u ? '' : '<label>Usuario (para entrar) <input name="username" required pattern="[a-zA-Z0-9._\\-]{2,30}" autocapitalize="none"></label>'}
+      <label>Área
+        <select name="area">${crm.meta.areas.map((a) => `<option value="${a}" ${(u?.area || 'comercial') === a ? 'selected' : ''}>${lab(a)}</option>`).join('')}</select>
+      </label>
+      <label>Cargo <input name="position" maxlength="60" placeholder="Asesor comercial, contador…" value="${esc(u?.position)}"></label>
       <label>Rol
         <select name="role">
-          <option value="personal" ${u?.role !== 'admin' ? 'selected' : ''}>Personal — registra entradas, salidas y mermas</option>
-          <option value="admin" ${u?.role === 'admin' ? 'selected' : ''}>Administrador — además gestiona productos, ajustes y personal</option>
+          <option value="personal" ${u?.role !== 'admin' ? 'selected' : ''}>Personal — trabaja en los módulos de su área</option>
+          <option value="admin" ${u?.role === 'admin' ? 'selected' : ''}>Administrador — acceso total, personal y configuración</option>
         </select>
       </label>
       <label>${u ? 'Nuevo PIN (déjalo vacío para no cambiarlo)' : 'PIN (4-8 dígitos)'}
@@ -476,9 +485,9 @@ function userDialog(u) {
       ${u ? `<label class="check"><input name="active" type="checkbox" ${u.active ? 'checked' : ''}> Puede entrar</label>` : ''}`,
     onSubmit: async (f) => {
       if (u) {
-        await api('PUT', `/api/users/${u.id}`, { name: f.name.value, role: f.role.value, pin: f.pin.value, active: f.active.checked });
+        await api('PUT', `/api/users/${u.id}`, { name: f.name.value, role: f.role.value, pin: f.pin.value, active: f.active.checked, area: f.area.value, position: f.position.value });
       } else {
-        await api('POST', '/api/users', { name: f.name.value, username: f.username.value, role: f.role.value, pin: f.pin.value });
+        await api('POST', '/api/users', { name: f.name.value, username: f.username.value, role: f.role.value, pin: f.pin.value, area: f.area.value, position: f.position.value });
       }
       toast(u ? 'Cambios guardados' : 'Persona añadida');
       loadUsers();
@@ -490,8 +499,9 @@ function userDialog(u) {
 
 let dialogSubmit = null;
 
-function openDialog({ title, body, ok = 'Guardar', onOpen, onSubmit }) {
+function openDialog({ title, body, ok = 'Guardar', onOpen, onSubmit, wide = false }) {
   const dialog = $('#dialog');
+  dialog.classList.toggle('wide', wide);
   $('#dialog-title').textContent = title;
   $('#dialog-body').innerHTML = body;
   $('#dialog-error').hidden = true;
@@ -501,7 +511,7 @@ function openDialog({ title, body, ok = 'Guardar', onOpen, onSubmit }) {
   $('#dialog-cancel').textContent = ok ? 'Cancelar' : 'Cerrar';
   dialogSubmit = onSubmit;
   state.dialogProductWatcher = null;
-  dialog.showModal();
+  if (!dialog.open) dialog.showModal();
   onOpen?.($('#dialog-body'), $('#dialog-form'));
 }
 

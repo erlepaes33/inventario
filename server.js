@@ -5,6 +5,7 @@ const path = require('node:path');
 const express = require('express');
 const { Server } = require('socket.io');
 const { openDatabase, HttpError } = require('./db');
+const { mountCrm } = require('./crm-routes');
 
 function createApp({ dbFile, adminPin = '1234', log = console.log } = {}) {
   const db = openDatabase(dbFile);
@@ -174,6 +175,8 @@ function createApp({ dbFile, adminPin = '1234', log = console.log } = {}) {
     return db.login(req.user.username, req.body.new_pin);
   }));
 
+  mountCrm(app, { db, auth, adminOnly, wrap, broadcast, sendCsv });
+
   app.use('/api', (req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
 
   // eslint-disable-next-line no-unused-vars
@@ -206,11 +209,11 @@ if (require.main === module) {
     adminPin: process.env.ADMIN_PIN || '1234',
   });
   server.listen(port, () => {
-    console.log(`Inventario en marcha → http://localhost:${port}`);
+    console.log(`CRM en marcha → http://localhost:${port}`);
     const nets = require('node:os').networkInterfaces();
     for (const addrs of Object.values(nets)) {
       for (const a of addrs || []) {
-        if (a.family === 'IPv4' && !a.internal) console.log(`  En la red del restaurante → http://${a.address}:${port}`);
+        if (a.family === 'IPv4' && !a.internal) console.log(`  En la red de la oficina → http://${a.address}:${port}`);
       }
     }
   });
